@@ -13,19 +13,6 @@
 
 namespace Raekor {
 
-struct shadowUBO {
-    glm::mat4 cameraMatrix;
-    glm::mat4 model;
-};
-
-struct VertexUBO {
-    glm::mat4 model, view, projection;
-    glm::mat4 lightSpaceMatrix;
-    glm::vec4 DirViewPos;
-    glm::vec4 DirLightPos;
-    glm::vec4 pointLightPos;
-};
-
 struct Uniforms {
     glm::vec4 sunColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
     float minBias = 0.005f, maxBias = 0.05f;
@@ -34,7 +21,7 @@ struct Uniforms {
 
 struct shadow3DUBO {
     glm::mat4 model;
-    glm::mat4 faceMatrices[6];
+    std::array<glm::mat4, 6> faceMatrices;
     glm::vec4 lightPos;
     float farPlane;
     float x, y, z;
@@ -97,9 +84,7 @@ void Application::run() {
     // create a Camera we can use to move around our scene
     Camera camera(glm::vec3(0, 1.0, 0), glm::perspectiveRH_ZO(glm::radians(65.0f), 16.0f / 9.0f, 0.1f, 10000.0f));
 
-    VertexUBO ubo = {};
-    shadowUBO shadowUbo;
-    shadow3DUBO ubo3d;
+    shadow3DUBO ubo3d = {};
     HDR_UBO hdr_ubo;
     Uniforms uniforms;
 
@@ -117,12 +102,7 @@ void Application::run() {
     std::unique_ptr<GLFrameBuffer> finalBuffer;
     std::unique_ptr<GLFrameBuffer> quadFB;
 
-    std::unique_ptr<GLResourceBuffer> dxrb;
-    std::unique_ptr<GLResourceBuffer> shadowVertUbo;
-    std::unique_ptr<GLResourceBuffer> extraUbo;
     std::unique_ptr<GLResourceBuffer> Shadow3DUbo;
-    std::unique_ptr<GLResourceBuffer> mat4Ubo;
-    std::unique_ptr<GLResourceBuffer> hdrUbo;
 
     std::unique_ptr<GLTextureCube> sky_image;
 
@@ -202,11 +182,7 @@ void Application::run() {
         {"BINORMAL",    ShaderType::FLOAT3}
     });
 
-    dxrb.reset(new GLResourceBuffer(sizeof(VertexUBO)));
-    shadowVertUbo.reset(new GLResourceBuffer(sizeof(shadowUBO)));
     Shadow3DUbo.reset(new GLResourceBuffer(sizeof(shadow3DUBO)));
-    mat4Ubo.reset(new GLResourceBuffer(sizeof(glm::mat4)));
-    hdrUbo.reset(new GLResourceBuffer(sizeof(HDR_UBO)));
 
     FrameBuffer::ConstructInfo finalInfo = {};
     finalInfo.size = {
@@ -388,6 +364,8 @@ void Application::run() {
     // toggle bool for changing the shadow map
     bool debugShadows = false;
 
+    Timer timer;
+
     //////////////////////////////////////////////////////////////
     //// main application loop //////////////////////////////////
     ////////////////////////////////////////////////////////////
@@ -396,7 +374,6 @@ void Application::run() {
         handle_sdl_gui_events({ directxwindow }, debugShadows ? sunCamera : camera, dt); // in shadow debug we're in control of the shadow map camera
         sunCamera.update();
         camera.update();
-
         // clear the main window
         Render::Clear({ 0.22f, 0.32f, 0.42f, 1.0f });
 
@@ -408,15 +385,16 @@ void Application::run() {
 
         // render the entire scene to the directional light shadow map
         depth_shader->bind();
+        auto& depthShader = *depth_shader;
         for (auto& m : models) {
             m.recalc_transform();
-            shadowUbo.cameraMatrix = sunCamera.getProjection() * sunCamera.getView();
-            shadowUbo.model = m.get_transform();
-            shadowVertUbo->update(&shadowUbo, sizeof(shadowUbo));
-            shadowVertUbo->bind(0);
+            (*depth_shader)["lightSpaceMatrix"] = sunCamera.getProjection() * sunCamera.getView();
+            (*depth_shader)["model"] = m.get_transform();
             m.render();
         }
         glCullFace(GL_BACK);
+
+
 
         // setup the 3D shadow map 
         glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
@@ -424,34 +402,27 @@ void Application::run() {
         glClear(GL_DEPTH_BUFFER_BIT);
 
         // generate the view matrices for calculating lightspace
-        std::vector<glm::mat4> shadowTransforms;
         glm::vec3 lightPosition = glm::make_vec3(lightPos);
-        shadowTransforms.push_back(shadowProj *
-            glm::lookAtRH(lightPosition, lightPosition + glm::vec3(1.0, 0.0, 0.0), glm::vec3(0.0, -1.0, 0.0)));
-        shadowTransforms.push_back(shadowProj *
-            glm::lookAtRH(lightPosition, lightPosition + glm::vec3(-1.0, 0.0, 0.0), glm::vec3(0.0, -1.0, 0.0)));
-        shadowTransforms.push_back(shadowProj *
-            glm::lookAtRH(lightPosition, lightPosition + glm::vec3(0.0, 1.0, 0.0), glm::vec3(0.0, 0.0, 1.0)));
-        shadowTransforms.push_back(shadowProj *
-            glm::lookAtRH(lightPosition, lightPosition + glm::vec3(0.0, -1.0, 0.0), glm::vec3(0.0, 0.0, -1.0)));
-        shadowTransforms.push_back(shadowProj *
-            glm::lookAtRH(lightPosition, lightPosition + glm::vec3(0.0, 0.0, 1.0), glm::vec3(0.0, -1.0, 0.0)));
-        shadowTransforms.push_back(shadowProj *
-            glm::lookAtRH(lightPosition, lightPosition + glm::vec3(0.0, 0.0, -1.0), glm::vec3(0.0, -1.0, 0.0)));
-
-        // update the cubemap ubo for omnidirectional shadows
-        for (int i = 0; i < 6; i++) ubo3d.faceMatrices[i] = shadowTransforms[i];
-        ubo3d.farPlane = farPlane;
-        ubo3d.lightPos = glm::vec4(lightPosition.x, lightPosition.y, lightPosition.z, 1.0f);
+        ubo3d.faceMatrices[0] = shadowProj * glm::lookAtRH(lightPosition, lightPosition + glm::vec3(1.0, 0.0, 0.0), glm::vec3(0.0, -1.0, 0.0));
+        ubo3d.faceMatrices[1] = shadowProj * glm::lookAtRH(lightPosition, lightPosition + glm::vec3(-1.0, 0.0, 0.0), glm::vec3(0.0, -1.0, 0.0));
+        ubo3d.faceMatrices[2] = shadowProj * glm::lookAtRH(lightPosition, lightPosition + glm::vec3(0.0, 1.0, 0.0), glm::vec3(0.0, 0.0, 1.0));
+        ubo3d.faceMatrices[3] = shadowProj * glm::lookAtRH(lightPosition, lightPosition + glm::vec3(0.0, -1.0, 0.0), glm::vec3(0.0, 0.0, -1.0));
+        ubo3d.faceMatrices[4] = shadowProj * glm::lookAtRH(lightPosition, lightPosition + glm::vec3(0.0, 0.0, 1.0), glm::vec3(0.0, -1.0, 0.0));
+        ubo3d.faceMatrices[5] = shadowProj * glm::lookAtRH(lightPosition, lightPosition + glm::vec3(0.0, 0.0, -1.0), glm::vec3(0.0, -1.0, 0.0));
 
 
-        // render every model using the depth cubemap shader
-        depthCube_shader->bind();
-        Shadow3DUbo->update(&ubo3d, sizeof(shadow3DUBO));
-        Shadow3DUbo->bind(0);
+        // retrieve the depthcube shader
+        auto& depthcubeShader = *depthCube_shader;
+        depthcubeShader.bind();
+        
+        // set depthcube shader uniforms
+        depthcubeShader["faceMatrices"] = ubo3d.faceMatrices;
+        depthcubeShader["farPlane"] = farPlane;
+        depthcubeShader["lightPos"] = glm::vec4(lightPosition.x, lightPosition.y, lightPosition.z, 1.0f);;
+        
         for (auto& m : models) {
             m.recalc_transform();
-            ubo3d.model = m.get_transform();
+            depthcubeShader["model"] = m.get_transform();
             m.render();
         }
 
@@ -499,17 +470,14 @@ void Application::run() {
             }
             // update all the model UBO attributes
             m.recalc_transform();
-            ubo.model = m.get_transform();
-            ubo.view = camera.getView();
-            ubo.projection = camera.getProjection();
+            shader["model"] = m.get_transform();
+            shader["view"] = camera.getView();
+            shader["projection"] = camera.getProjection();
             ImGuizmo::DecomposeMatrixToComponents(glm::value_ptr(lightmatrix), lightPos, lightRot, lightScale);
-            ubo.pointLightPos = glm::vec4(glm::make_vec3(lightPos), 1.0f);
-            ubo.DirLightPos = glm::vec4(sunCamera.getPosition(), 1.0);
-            ubo.DirViewPos = glm::vec4(camera.getPosition(), 1.0);
-            ubo.lightSpaceMatrix = sunCamera.getProjection() * sunCamera.getView();
-
-            dxrb->update(&ubo, sizeof(VertexUBO));
-            dxrb->bind(0);
+            shader["pointLightPos"] = glm::vec4(glm::make_vec3(lightPos), 1.0f);
+            shader["DirLightPos"] = glm::vec4(sunCamera.getPosition(), 1.0);
+            shader["cameraPosition"] = glm::vec4(camera.getPosition(), 1.0);
+            shader["lightSpaceMatrix"] = sunCamera.getProjection() * sunCamera.getView();
 
             // render the mesh
             m.render();
@@ -518,13 +486,14 @@ void Application::run() {
         // unbind the framebuffer to switch to the application's backbuffer for ImGui
         hdrBuffer->unbind();
 
+        auto& hdrShader = *hdr_shader;
         static bool hdr = true;
         if (hdr) {
             finalBuffer->bind();
-            hdr_shader->bind();
+            hdrShader.bind();
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-            hdrUbo->update(&hdr_ubo, sizeof(HDR_UBO));
-            hdrUbo->bind(0);
+            hdrShader["exposure"] = hdr_ubo.exposure;
+            hdrShader["gamma"] = hdr_ubo.gamma;
             hdrBuffer->bindTexture(0);
             Quad->render();
             finalBuffer->unbind();
@@ -698,7 +667,7 @@ void Application::run() {
             }
             ImGui::EndCombo();
         }
-
+        
         // toggle button for openGl vsync
         static bool use_vsync = false;
         if (ImGui::RadioButton("USE VSYNC", use_vsync)) {
@@ -818,6 +787,7 @@ void Application::run() {
 
         ImGui::End();
         Render::ImGui_Render();
+
         Render::SwapBuffers(use_vsync);
         dt_timer.stop();
         dt = dt_timer.elapsed_ms();

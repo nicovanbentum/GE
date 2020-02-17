@@ -5,11 +5,6 @@ layout (location = 2) in vec3 normal;
 
 out vec2 TexCoords;
 
-layout (std140) uniform stuff {
-	float exposure;
-	float gamma;
-} ubo;
-
 void main()
 {
 	TexCoords = uv;

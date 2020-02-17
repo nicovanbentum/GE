@@ -2,14 +2,6 @@
 
 const float PI = 3.14159265359;
 
-layout (std140) uniform stuff {
-    mat4 model, view, projection;
-	mat4 lightSpaceMatrix;
-	vec4 cameraPosition;
-    vec4 DirLightPos;
-	vec4 pointLightPos;
-} ubo;
-
 uniform vec4 sunColor;
 uniform float minBias;
 uniform float maxBias;

@@ -2,13 +2,7 @@
 layout (triangles) in;
 layout (triangle_strip, max_vertices=18) out;
 
-layout (std140) uniform stuff {
-    mat4 model;
-	mat4 faceMatrices[6];
-	vec4 lightPos;
-	float farPlane;
-	float x, y, z;
-} ubo;
+uniform mat4 faceMatrices[6];
 
 out vec4 FragPos;
 
@@ -18,7 +12,7 @@ void main()
         gl_Layer = face;
         for(int i = 0; i < 3; ++i) {
             FragPos = gl_in[i].gl_Position;
-            gl_Position = ubo.faceMatrices[face] * FragPos;
+            gl_Position = faceMatrices[face] * FragPos;
             EmitVertex();
         }    
         EndPrimitive();

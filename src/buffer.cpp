@@ -33,9 +33,7 @@ namespace Raekor {
 
     void GLResourceBuffer::update(void* data, const size_t size) const {
         glBindBuffer(GL_UNIFORM_BUFFER, id);
-        void* data_ptr = glMapBuffer(GL_UNIFORM_BUFFER, GL_READ_WRITE);
-        memcpy(data_ptr, data, size);
-        glUnmapBuffer(GL_UNIFORM_BUFFER);
+        glBufferSubData(GL_UNIFORM_BUFFER, 0, size, data);
         glBindBuffer(GL_UNIFORM_BUFFER, 0);
     }
 

@@ -47,6 +47,12 @@ protected:
             glUniform4f(id, rhs.x, rhs.y, rhs.z, rhs.w);
             return *this;
         }
+
+        template<unsigned int Size>
+        loc& operator=(const std::array<glm::mat4, Size>& matrices) {
+            glUniformMatrix4fv(id, matrices.size(), GL_FALSE, glm::value_ptr(matrices[0]));
+            return *this;
+        }
     };
 };
 
